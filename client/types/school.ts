@@ -1,3 +1,37 @@
+// ==================== USER TYPES (UPDATED) ====================
+export type UserType = 'planner' | 'headteacher' | 'deputy' | 'hod' | 'class_teacher' | 'subject_teacher';
+
+export interface SubjectAssignment {
+  subject: string;
+  classes: string[]; // class IDs or names
+}
+
+export interface TeacherDetails {
+  subjects: SubjectAssignment[];
+  isClassTeacher?: boolean;
+  classTeacherOf?: string; // class name if they are class teacher
+  department?: string; // for HoDs
+}
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  userType: UserType;
+  teacherDetails?: TeacherDetails;
+  isApproved: boolean; // false for teachers/HoDs until planner approves
+  createdAt: string;
+  approvedAt?: string;
+  approvedBy?: string; // planner ID who approved
+  
+  // Optional fields
+  phone?: string;
+  profileImage?: string;
+  schoolId?: string;
+  isActive: boolean;
+  updatedAt?: string;
+}
+
 // ==================== LEARNER TYPE WITH GENDER ====================
 export interface Learner {
   id: string;
@@ -30,24 +64,32 @@ export interface CSVLearnerData {
   classId?: string;
 }
 
-// ==================== TEACHER TYPE ====================
+// ==================== TEACHER TYPE (UPDATED) ====================
 export interface Teacher {
   id: string;
   name: string;
   email: string;
   phone: string;
   department: string;
-  subjects: string[];
+  subjects: SubjectAssignment[]; // Updated to use SubjectAssignment
   assignedClasses: string[];
   
-  // Added from service layer
+  // Role-specific fields
+  userType: UserType;
+  isApproved: boolean;
+  approvedAt?: string;
+  approvedBy?: string;
+  
+  // Class teacher specific
   isFormTeacher?: boolean;
   assignedClassId?: string;
   assignedClassName?: string;
+  
+  // Employment details
   employmentDate?: Date;
   status?: 'active' | 'inactive' | 'on_leave';
   
-  // Existing
+  // Metadata
   createdBy?: string;
   createdAt?: Date;
   updatedAt?: Date;
@@ -62,11 +104,18 @@ export interface Class {
   level: number;
   section: string;
   students: number;
-  teachers: string[];
+  teachers: string[]; // teacher IDs
   
-  // For backward compatibility
+  // Form teacher
   formTeacherId?: string;
   formTeacherName?: string;
+  
+  // Subject teachers
+  subjectTeachers?: Array<{
+    subject: string;
+    teacherId: string;
+    teacherName: string;
+  }>;
   
   // Gender statistics
   genderStats?: {
@@ -77,7 +126,7 @@ export interface Class {
     girlsPercentage: number;
   };
   
-  // Existing
+  // Status
   isActive: boolean;
   createdDate?: Date;
   nextYearClassId?: string;
@@ -122,14 +171,16 @@ export interface ClassCSVImportData {
   section?: string;
 }
 
-// ==================== DASHBOARD STATS ====================
+// ==================== DASHBOARD STATS (UPDATED) ====================
 export interface DashboardStats {
   totalClasses: number;
   totalStudents: number;
   averageClassSize: number;
   totalTeachers: number;
   activeTeachers: number;
+  pendingApprovals: number; // New: teachers waiting for approval
   teachersByDepartment: Record<string, number>;
+  teachersByRole: Record<UserType, number>; // New: breakdown by role
   
   // Gender statistics
   genderStats?: {
@@ -144,20 +195,6 @@ export interface DashboardStats {
   averagePassRate?: number;
   examsGraded?: number;
   totalExams?: number;
-}
-
-// ==================== USER TYPE ====================
-export interface User {
-  id: string;
-  email: string;
-  name: string;
-  userType: 'admin' | 'teacher' | 'parent' | 'learner';
-  createdAt: Date;
-  updatedAt: Date;
-  phone?: string;
-  profileImage?: string;
-  schoolId?: string;
-  isActive: boolean;
 }
 
 // ==================== RESULTS ANALYSIS TYPES ====================
@@ -240,4 +277,45 @@ export interface GenderStats {
   total: number;
   boysPercentage: number;
   girlsPercentage: number;
+}
+
+// ==================== APPROVAL SYSTEM TYPES (NEW) ====================
+export interface ApprovalRequest {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userType: UserType;
+  teacherDetails: TeacherDetails;
+  requestedAt: string;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewedAt?: string;
+  reviewedBy?: string;
+  reviewNotes?: string;
+}
+
+export interface ApprovalStats {
+  pending: number;
+  approved: number;
+  rejected: number;
+  total: number;
+}
+
+// ==================== DEPARTMENT TYPES (NEW) ====================
+export interface Department {
+  id: string;
+  name: string;
+  hod?: string; // teacher ID
+  hodName?: string;
+  subjects: string[];
+  teachers: string[]; // teacher IDs
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface DepartmentStats {
+  totalTeachers: number;
+  totalSubjects: number;
+  averagePerformance: number;
+  performanceBySubject: Record<string, number>;
 }

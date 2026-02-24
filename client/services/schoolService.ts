@@ -1,4 +1,4 @@
-// @/services/schoolService.ts - ENHANCED WITH GENDER SUPPORT
+// @/services/schoolService.ts - UPDATED WITH NEW USER ROLES
 import {
   collection,
   query,
@@ -34,7 +34,14 @@ import {
   GenderUpdate,
   GradeDistribution,
   ClassPerformance,
-  SubjectPerformance
+  SubjectPerformance,
+  User,
+  UserType,
+  TeacherDetails,
+  SubjectAssignment,
+  ApprovalRequest,
+  Department,
+  DepartmentStats
 } from '@/types/school';
 
 // ==================== IMPORT NORMALIZATION UTILITY ====================
@@ -111,6 +118,300 @@ const calculateGenderStats = (learners: Learner[]): GenderStats => {
   };
 };
 
+/**
+ * Get user-friendly role label
+ */
+const getUserRoleLabel = (userType: UserType): string => {
+  const labels: Record<UserType, string> = {
+    'planner': 'Planner',
+    'headteacher': 'Head Teacher',
+    'deputy': 'Deputy Head',
+    'hod': 'Head of Department',
+    'class_teacher': 'Class Teacher',
+    'subject_teacher': 'Subject Teacher'
+  };
+  return labels[userType] || userType;
+};
+
+/**
+ * Check if user role requires approval
+ */
+const requiresApproval = (userType: UserType): boolean => {
+  return ['hod', 'class_teacher', 'subject_teacher'].includes(userType);
+};
+
+// ==================== USER SERVICE (NEW) ====================
+
+const userService = {
+  /**
+   * Get all users with optional filters
+   */
+  getUsers: async (filters?: {
+    userType?: UserType;
+    isApproved?: boolean;
+    searchTerm?: string;
+    department?: string;
+  }): Promise<User[]> => {
+    try {
+      const usersRef = collection(db, 'users');
+      const constraints: any[] = [];
+
+      if (filters?.userType) {
+        constraints.push(where('userType', '==', filters.userType));
+      }
+      if (filters?.isApproved !== undefined) {
+        constraints.push(where('isApproved', '==', filters.isApproved));
+      }
+      if (filters?.department) {
+        constraints.push(where('teacherDetails.department', '==', filters.department));
+      }
+
+      let q;
+      if (constraints.length > 0) {
+        q = query(usersRef, ...constraints, orderBy('name', 'asc'));
+      } else {
+        q = query(usersRef, orderBy('name', 'asc'));
+      }
+
+      const snapshot = await getDocs(q);
+      let users = snapshot.docs.map(doc => {
+        const data = doc.data() as DocumentData;
+        return {
+          id: doc.id,
+          email: data.email || '',
+          name: data.name || '',
+          userType: data.userType || 'subject_teacher',
+          teacherDetails: data.teacherDetails || undefined,
+          isApproved: data.isApproved || false,
+          createdAt: data.createdAt || new Date().toISOString(),
+          approvedAt: data.approvedAt,
+          approvedBy: data.approvedBy,
+          phone: data.phone,
+          profileImage: data.profileImage,
+          schoolId: data.schoolId,
+          isActive: data.isActive !== false,
+          updatedAt: data.updatedAt,
+        } as User;
+      });
+
+      // Apply search filter if provided
+      if (filters?.searchTerm) {
+        const searchLower = filters.searchTerm.toLowerCase();
+        users = users.filter(u =>
+          u.name.toLowerCase().includes(searchLower) ||
+          u.email.toLowerCase().includes(searchLower)
+        );
+      }
+
+      return users;
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get a single user by ID
+   */
+  getUserById: async (userId: string): Promise<User | null> => {
+    try {
+      const userRef = doc(db, 'users', userId);
+      const userDoc = await getDoc(userRef);
+      
+      if (!userDoc.exists()) {
+        return null;
+      }
+      
+      const data = userDoc.data() as DocumentData;
+      return {
+        id: userDoc.id,
+        email: data.email || '',
+        name: data.name || '',
+        userType: data.userType || 'subject_teacher',
+        teacherDetails: data.teacherDetails || undefined,
+        isApproved: data.isApproved || false,
+        createdAt: data.createdAt || new Date().toISOString(),
+        approvedAt: data.approvedAt,
+        approvedBy: data.approvedBy,
+        phone: data.phone,
+        profileImage: data.profileImage,
+        schoolId: data.schoolId,
+        isActive: data.isActive !== false,
+        updatedAt: data.updatedAt,
+      } as User;
+    } catch (error) {
+      console.error('Error fetching user:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get pending approval requests
+   */
+  getPendingApprovals: async (): Promise<ApprovalRequest[]> => {
+    try {
+      const usersRef = collection(db, 'users');
+      const q = query(
+        usersRef,
+        where('isApproved', '==', false),
+        where('userType', 'in', ['hod', 'class_teacher', 'subject_teacher']),
+        orderBy('createdAt', 'desc')
+      );
+
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => {
+        const data = doc.data() as DocumentData;
+        return {
+          id: doc.id,
+          userId: doc.id,
+          userName: data.name || '',
+          userEmail: data.email || '',
+          userType: data.userType,
+          teacherDetails: data.teacherDetails,
+          requestedAt: data.createdAt,
+          status: 'pending',
+        } as ApprovalRequest;
+      });
+    } catch (error) {
+      console.error('Error fetching pending approvals:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Approve a user account
+   */
+  approveUser: async (userId: string, approvedBy: string, notes?: string): Promise<void> => {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        isApproved: true,
+        approvedAt: serverTimestamp(),
+        approvedBy,
+        reviewNotes: notes,
+        updatedAt: serverTimestamp()
+      });
+      
+      console.log(`✅ User ${userId} approved by ${approvedBy}`);
+    } catch (error) {
+      console.error('Error approving user:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Reject a user account
+   */
+  rejectUser: async (userId: string, rejectedBy: string, reason: string): Promise<void> => {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        isApproved: false,
+        rejectedAt: serverTimestamp(),
+        rejectedBy,
+        rejectionReason: reason,
+        status: 'rejected',
+        updatedAt: serverTimestamp()
+      });
+      
+      console.log(`❌ User ${userId} rejected by ${rejectedBy}: ${reason}`);
+    } catch (error) {
+      console.error('Error rejecting user:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get teachers by department (for HoD view)
+   */
+  getTeachersByDepartment: async (department: string): Promise<User[]> => {
+    try {
+      const usersRef = collection(db, 'users');
+      const q = query(
+        usersRef,
+        where('teacherDetails.department', '==', department),
+        where('userType', 'in', ['hod', 'class_teacher', 'subject_teacher']),
+        where('isApproved', '==', true),
+        orderBy('name', 'asc')
+      );
+
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => {
+        const data = doc.data() as DocumentData;
+        return {
+          id: doc.id,
+          email: data.email || '',
+          name: data.name || '',
+          userType: data.userType,
+          teacherDetails: data.teacherDetails,
+          isApproved: true,
+          createdAt: data.createdAt,
+        } as User;
+      });
+    } catch (error) {
+      console.error('Error fetching teachers by department:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get department statistics (for HoD dashboard)
+   */
+  getDepartmentStats: async (department: string): Promise<DepartmentStats> => {
+    try {
+      const teachers = await userService.getTeachersByDepartment(department);
+      
+      // Get unique subjects from all teachers
+      const subjectsSet = new Set<string>();
+      teachers.forEach(teacher => {
+        teacher.teacherDetails?.subjects?.forEach(s => {
+          subjectsSet.add(s.subject);
+        });
+      });
+      
+      // Get performance data from results
+      const resultsRef = collection(db, 'results');
+      const q = query(
+        resultsRef,
+        where('department', '==', department),
+        where('year', '==', new Date().getFullYear())
+      );
+      
+      const snapshot = await getDocs(q);
+      const results = snapshot.docs.map(doc => doc.data());
+      
+      const performanceBySubject: Record<string, number> = {};
+      if (results.length > 0) {
+        const subjectResults: Record<string, number[]> = {};
+        results.forEach(r => {
+          if (!subjectResults[r.subject]) subjectResults[r.subject] = [];
+          subjectResults[r.subject].push(r.grade);
+        });
+        
+        Object.entries(subjectResults).forEach(([subject, grades]) => {
+          const avgGrade = grades.reduce((sum, g) => sum + g, 0) / grades.length;
+          performanceBySubject[subject] = Math.round(avgGrade * 10) / 10;
+        });
+      }
+      
+      const totalGrades = results.map(r => r.grade).filter(g => g);
+      const averagePerformance = totalGrades.length > 0
+        ? Math.round((totalGrades.reduce((sum, g) => sum + g, 0) / totalGrades.length) * 10) / 10
+        : 0;
+      
+      return {
+        totalTeachers: teachers.length,
+        totalSubjects: subjectsSet.size,
+        averagePerformance,
+        performanceBySubject,
+      };
+    } catch (error) {
+      console.error('Error getting department stats:', error);
+      throw error;
+    }
+  },
+};
+
 // ==================== CLASS SERVICE ====================
 
 const classService = {
@@ -158,6 +459,14 @@ const classService = {
         const learners = await learnerService.getLearnersByClass(doc.id);
         const genderStats = calculateGenderStats(learners);
         
+        // Get subject teachers from assignments
+        const assignments = await classService.getTeacherAssignmentsByClass(doc.id);
+        const subjectTeachers = assignments.map(a => ({
+          subject: a.subject,
+          teacherId: a.teacherId,
+          teacherName: a.teacherName,
+        }));
+        
         return {
           id: doc.id,
           name: data.name || '',
@@ -170,6 +479,7 @@ const classService = {
           isActive: data.isActive !== false,
           formTeacherId: data.formTeacherId,
           formTeacherName: data.formTeacherName,
+          subjectTeachers,
           genderStats,
           createdDate: toDate(data.createdDate) || new Date(),
           createdAt: toDate(data.createdAt),
@@ -211,6 +521,14 @@ const classService = {
       const learners = await learnerService.getLearnersByClass(classId);
       const genderStats = calculateGenderStats(learners);
       
+      // Get subject teachers from assignments
+      const assignments = await classService.getTeacherAssignmentsByClass(classId);
+      const subjectTeachers = assignments.map(a => ({
+        subject: a.subject,
+        teacherId: a.teacherId,
+        teacherName: a.teacherName,
+      }));
+      
       return {
         id: classDoc.id,
         name: data.name || '',
@@ -223,6 +541,7 @@ const classService = {
         isActive: data.isActive !== false,
         formTeacherId: data.formTeacherId,
         formTeacherName: data.formTeacherName,
+        subjectTeachers,
         genderStats,
         createdDate: toDate(data.createdDate) || new Date(),
         createdAt: toDate(data.createdAt),
@@ -388,7 +707,7 @@ const classService = {
   },
 
   /**
-   * Get dashboard statistics with gender stats
+   * Get dashboard statistics with gender stats and approval counts
    */
   getDashboardStats: async (): Promise<DashboardStats> => {
     try {
@@ -398,37 +717,35 @@ const classService = {
       const allLearners = await learnerService.getAllLearners();
       const genderStats = calculateGenderStats(allLearners);
       
-      // Query users collection for teachers
-      const usersRef = collection(db, 'users');
-      const teachersQuery = query(
-        usersRef,
-        where('userType', '==', 'teacher')
-      );
-      const teachersSnapshot = await getDocs(teachersQuery);
+      // Get all users with new roles
+      const users = await userService.getUsers();
       
-      const teachers = teachersSnapshot.docs.map(doc => {
-        const data = doc.data() as DocumentData;
-        return {
-          id: doc.id,
-          name: data.name || '',
-          email: data.email || '',
-          phone: data.phone || '',
-          department: data.department || 'General',
-          subjects: data.subjects || [],
-          assignedClasses: data.assignedClasses || [],
-          status: data.status || 'active',
-        } as Teacher;
-      });
+      const teachers = users.filter(u => 
+        ['hod', 'class_teacher', 'subject_teacher'].includes(u.userType)
+      );
+      
+      const pendingApprovals = users.filter(u => 
+        !u.isApproved && ['hod', 'class_teacher', 'subject_teacher'].includes(u.userType)
+      ).length;
       
       const totalClasses = classes.length;
       const totalStudents = classes.reduce((sum, c) => sum + (c.students || 0), 0);
       const averageClassSize = totalClasses > 0 ? totalStudents / totalClasses : 0;
       const totalTeachers = teachers.length;
-      const activeTeachers = teachers.filter(t => t.status === 'active' || !t.status).length;
+      const activeTeachers = users.filter(u => u.isActive !== false).length;
       
       const teachersByDepartment: Record<string, number> = {};
+      const teachersByRole: Record<UserType, number> = {
+        planner: users.filter(u => u.userType === 'planner').length,
+        headteacher: users.filter(u => u.userType === 'headteacher').length,
+        deputy: users.filter(u => u.userType === 'deputy').length,
+        hod: users.filter(u => u.userType === 'hod').length,
+        class_teacher: users.filter(u => u.userType === 'class_teacher').length,
+        subject_teacher: users.filter(u => u.userType === 'subject_teacher').length,
+      };
+      
       teachers.forEach(teacher => {
-        const dept = teacher.department || 'General';
+        const dept = teacher.teacherDetails?.department || 'General';
         teachersByDepartment[dept] = (teachersByDepartment[dept] || 0) + 1;
       });
       
@@ -438,7 +755,9 @@ const classService = {
         averageClassSize,
         totalTeachers,
         activeTeachers,
+        pendingApprovals,
         teachersByDepartment,
+        teachersByRole,
         genderStats: {
           totalBoys: genderStats.boys,
           totalGirls: genderStats.girls,
@@ -903,41 +1222,64 @@ const learnerService = {
   },
 };
 
-// ==================== TEACHER SERVICE (WITH SUBJECT NORMALIZATION) ====================
+// ==================== TEACHER SERVICE (UPDATED WITH NEW ROLES) ====================
 
 const teacherService = {
   /**
-   * Get all teachers from users collection
+   * Get all teachers (users with teaching roles)
    */
-  getTeachers: async (): Promise<Teacher[]> => {
+  getTeachers: async (filters?: {
+    department?: string;
+    isApproved?: boolean;
+    searchTerm?: string;
+  }): Promise<User[]> => {
     try {
       const usersRef = collection(db, 'users');
-      const q = query(
-        usersRef,
-        where('userType', '==', 'teacher'),
-        orderBy('name', 'asc')
-      );
-      
+      const constraints: any[] = [
+        where('userType', 'in', ['hod', 'class_teacher', 'subject_teacher'])
+      ];
+
+      if (filters?.isApproved !== undefined) {
+        constraints.push(where('isApproved', '==', filters.isApproved));
+      }
+
+      let q = query(usersRef, ...constraints, orderBy('name', 'asc'));
       const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => {
+      
+      let teachers = snapshot.docs.map(doc => {
         const data = doc.data() as DocumentData;
         return {
           id: doc.id,
-          name: data.name || '',
           email: data.email || '',
-          phone: data.phone || '',
-          department: data.department || 'General',
-          subjects: data.subjects || [],
-          assignedClasses: data.assignedClasses || [],
-          isFormTeacher: data.isFormTeacher || false,
-          assignedClassId: data.assignedClassId,
-          assignedClassName: data.assignedClassName,
-          status: data.status || 'active',
-          employmentDate: toDate(data.employmentDate) || toDate(data.createdAt) || new Date(),
-          createdAt: toDate(data.createdAt),
-          updatedAt: toDate(data.updatedAt),
-        } as Teacher;
+          name: data.name || '',
+          userType: data.userType,
+          teacherDetails: data.teacherDetails || undefined,
+          isApproved: data.isApproved || false,
+          createdAt: data.createdAt,
+          approvedAt: data.approvedAt,
+          approvedBy: data.approvedBy,
+          phone: data.phone,
+          isActive: data.isActive !== false,
+        } as User;
       });
+
+      // Filter by department if provided
+      if (filters?.department) {
+        teachers = teachers.filter(t => 
+          t.teacherDetails?.department === filters.department
+        );
+      }
+
+      // Apply search filter if provided
+      if (filters?.searchTerm) {
+        const searchLower = filters.searchTerm.toLowerCase();
+        teachers = teachers.filter(t =>
+          t.name.toLowerCase().includes(searchLower) ||
+          t.email.toLowerCase().includes(searchLower)
+        );
+      }
+
+      return teachers;
     } catch (error) {
       console.error('Error fetching teachers:', error);
       throw error;
@@ -947,32 +1289,20 @@ const teacherService = {
   /**
    * Get teachers assigned to a specific class
    */
-  getTeachersByClass: async (classId: string): Promise<Teacher[]> => {
+  getTeachersByClass: async (classId: string): Promise<User[]> => {
     try {
-      const usersRef = collection(db, 'users');
-      const q = query(
-        usersRef,
-        where('userType', '==', 'teacher'),
-        where('assignedClasses', 'array-contains', classId),
-        orderBy('name', 'asc')
-      );
+      const assignments = await classService.getTeacherAssignmentsByClass(classId);
+      const teacherIds = assignments.map(a => a.teacherId);
       
-      const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => {
-        const data = doc.data() as DocumentData;
-        return {
-          id: doc.id,
-          name: data.name || '',
-          email: data.email || '',
-          phone: data.phone || '',
-          department: data.department || 'General',
-          subjects: data.subjects || [],
-          assignedClasses: data.assignedClasses || [],
-          isFormTeacher: data.isFormTeacher || false,
-          assignedClassId: data.assignedClassId,
-          assignedClassName: data.assignedClassName,
-        } as Teacher;
-      });
+      if (teacherIds.length === 0) return [];
+      
+      const teachers: User[] = [];
+      for (const id of teacherIds) {
+        const teacher = await userService.getUserById(id);
+        if (teacher) teachers.push(teacher);
+      }
+      
+      return teachers;
     } catch (error) {
       console.error('Error fetching class teachers:', error);
       throw error;
@@ -1090,9 +1420,14 @@ const teacherService = {
       const teacherData = teacherDoc.data() as DocumentData;
       
       // Validate that the teacher actually teaches this subject (using normalized comparison)
-      const teacherSubjects = (teacherData.subjects || []).map((s: string) => normalizeSubjectName(s));
+      const teacherSubjects = (teacherData.teacherDetails?.subjects || []).map((s: SubjectAssignment) => 
+        normalizeSubjectName(s.subject)
+      );
+      
       if (!teacherSubjects.includes(normalizedSubject)) {
-        throw new Error(`Teacher does not teach ${subject} (normalized: ${normalizedSubject}). Their subjects are: ${teacherData.subjects.join(', ')}`);
+        throw new Error(`Teacher does not teach ${subject} (normalized: ${normalizedSubject}). Their subjects are: ${
+          teacherData.teacherDetails?.subjects.map((s: SubjectAssignment) => s.subject).join(', ')
+        }`);
       }
       
       const classRef = doc(db, 'classes', classId);
@@ -1285,7 +1620,7 @@ const teacherService = {
   },
 };
 
-// ==================== RESULTS ANALYSIS SERVICE (NEW) ====================
+// ==================== RESULTS ANALYSIS SERVICE ====================
 
 const resultsAnalysisService = {
   /**
@@ -1519,15 +1854,138 @@ const resultsAnalysisService = {
   }
 };
 
+// ==================== DEPARTMENT SERVICE (NEW) ====================
+
+const departmentService = {
+  /**
+   * Get all departments with stats
+   */
+  getDepartments: async (): Promise<Department[]> => {
+    try {
+      const departmentsRef = collection(db, 'departments');
+      const snapshot = await getDocs(departmentsRef);
+      
+      return snapshot.docs.map(doc => {
+        const data = doc.data() as DocumentData;
+        return {
+          id: doc.id,
+          name: data.name || '',
+          hod: data.hod,
+          hodName: data.hodName,
+          subjects: data.subjects || [],
+          teachers: data.teachers || [],
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+        } as Department;
+      });
+    } catch (error) {
+      console.error('Error fetching departments:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get a single department by ID
+   */
+  getDepartmentById: async (departmentId: string): Promise<Department | null> => {
+    try {
+      const deptRef = doc(db, 'departments', departmentId);
+      const deptDoc = await getDoc(deptRef);
+      
+      if (!deptDoc.exists()) {
+        return null;
+      }
+      
+      const data = deptDoc.data() as DocumentData;
+      return {
+        id: deptDoc.id,
+        name: data.name || '',
+        hod: data.hod,
+        hodName: data.hodName,
+        subjects: data.subjects || [],
+        teachers: data.teachers || [],
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt,
+      } as Department;
+    } catch (error) {
+      console.error('Error fetching department:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Create a new department
+   */
+  createDepartment: async (data: {
+    name: string;
+    subjects: string[];
+  }): Promise<string> => {
+    try {
+      const departmentsRef = collection(db, 'departments');
+      
+      // Check if department already exists
+      const q = query(departmentsRef, where('name', '==', data.name));
+      const existing = await getDocs(q);
+      if (!existing.empty) {
+        throw new Error(`Department ${data.name} already exists`);
+      }
+      
+      const deptData = {
+        name: data.name,
+        subjects: data.subjects,
+        teachers: [],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      
+      const docRef = await addDoc(departmentsRef, deptData);
+      return docRef.id;
+    } catch (error) {
+      console.error('Error creating department:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Assign HoD to department
+   */
+  assignHoD: async (departmentId: string, hodId: string, hodName: string): Promise<void> => {
+    try {
+      const deptRef = doc(db, 'departments', departmentId);
+      await updateDoc(deptRef, {
+        hod: hodId,
+        hodName: hodName,
+        updatedAt: serverTimestamp(),
+      });
+      
+      // Update user document
+      const userRef = doc(db, 'users', hodId);
+      await updateDoc(userRef, {
+        'teacherDetails.department': (await getDoc(deptRef)).data()?.name,
+        updatedAt: serverTimestamp(),
+      });
+      
+      console.log(`✅ Assigned ${hodName} as HoD of department ${departmentId}`);
+    } catch (error) {
+      console.error('Error assigning HoD:', error);
+      throw error;
+    }
+  },
+};
+
 // ==================== EXPORT ALL SERVICES ====================
 export {
+  userService,
   classService,
   learnerService,
   teacherService,
   resultsAnalysisService,
+  departmentService,
   normalizeSubjectName,
   parseClassName,
   generateStudentId,
   calculateGenderStats,
+  getUserRoleLabel,
+  requiresApproval,
   toDate,
 };

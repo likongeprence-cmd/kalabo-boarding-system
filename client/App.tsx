@@ -8,23 +8,46 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
-import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { 
+  ProtectedRoute, 
+  AdminRoute, 
+  TeacherRoute, 
+  HoDRoute, 
+  ClassTeacherRoute, 
+  SubjectTeacherRoute,
+  ApprovalAwareRoute 
+} from "@/components/ProtectedRoute";
 import Landing from "./pages/Landing";
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
+import PendingApproval from "./pages/PendingApproval";
+import Unauthorized from "./pages/Unauthorized";
 
-// Admin Pages
+// Admin/Management Pages (Planner, Headteacher, Deputy)
 import AdminDashboard from "./pages/AdminDashboard";
 import ClassManagement from "./pages/admin/ClassManagement";
 import TeacherManagement from "./pages/admin/TeacherManagement";
 import ReportCards from "./pages/admin/ReportCards";
 import AdminResultsAnalysis from "./pages/admin/AdminResultsAnalysis";
+import PendingApprovals from "./pages/admin/PendingApprovals"; // New page for planner to approve teachers
 
-// Teacher Pages
+// Teacher Pages (All teaching staff)
 import TeacherDashboard from "./pages/TeacherDashboard";
 import AttendanceTracking from "./pages/teacher/AttendanceTracking";
 import ResultsEntry from "./pages/teacher/ResultsEntry";
 import TeacherResultsAnalysis from "./pages/teacher/TeacherResultsAnalysis";
+
+// HoD Specific Pages
+import DepartmentPerformance from "./pages/hod/DepartmentPerformance";
+import DepartmentTeachers from "./pages/hod/DepartmentTeachers";
+
+// Class Teacher Specific Pages
+import DailyAttendance from "./pages/class-teacher/DailyAttendance";
+import ClassPerformance from "./pages/class-teacher/ClassPerformance";
+
+// Subject Teacher Specific Pages
+import SubjectPerformance from "./pages/subject-teacher/SubjectPerformance";
+import MyTimetable from "./pages/subject-teacher/MyTimetable";
 
 import NotFound from "./pages/NotFound";
 
@@ -39,61 +62,117 @@ const App = () => (
         <AuthProvider>
           <PWAInstallPrompt />
           <Routes>
-            {/* Public Routes */}
+            {/* ========== PUBLIC ROUTES ========== */}
             <Route path="/" element={<Landing />} />
             <Route path="/signin" element={<SignIn />} />
             <Route path="/signup" element={<SignUp />} />
+            <Route path="/pending-approval" element={<PendingApproval />} />
+            <Route path="/unauthorized" element={<Unauthorized />} />
 
-            {/* Admin Routes - Protected */}
+            {/* ========== ADMIN/MANAGEMENT ROUTES (Planner, Headteacher, Deputy) ========== */}
             <Route path="/dashboard/admin" element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <AdminRoute>
                 <AdminDashboard />
-              </ProtectedRoute>
+              </AdminRoute>
             } />
+            
             <Route path="/dashboard/admin/classes" element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <AdminRoute>
                 <ClassManagement />
-              </ProtectedRoute>
+              </AdminRoute>
             } />
+            
             <Route path="/dashboard/admin/teachers" element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <AdminRoute>
                 <TeacherManagement />
-              </ProtectedRoute>
+              </AdminRoute>
             } />
+            
             <Route path="/dashboard/admin/report-cards" element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <AdminRoute>
                 <ReportCards />
-              </ProtectedRoute>
+              </AdminRoute>
             } />
+            
             <Route path="/dashboard/admin/results-analysis" element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <AdminRoute>
                 <AdminResultsAnalysis />
+              </AdminRoute>
+            } />
+            
+            {/* Planner-only route for approving teachers */}
+            <Route path="/dashboard/admin/pending-approvals" element={
+              <ProtectedRoute allowedRoles={['planner']}>
+                <PendingApprovals />
               </ProtectedRoute>
             } />
 
-            {/* Teacher Routes - Protected */}
+            {/* ========== TEACHER BASE ROUTES (All teachers - redirects based on role) ========== */}
             <Route path="/dashboard/teacher" element={
-              <ProtectedRoute allowedRoles={['teacher']}>
+              <ApprovalAwareRoute>
                 <TeacherDashboard />
-              </ProtectedRoute>
-            } />
-            <Route path="/dashboard/teacher/attendance" element={
-              <ProtectedRoute allowedRoles={['teacher']}>
-                <AttendanceTracking />
-              </ProtectedRoute>
-            } />
-            <Route path="/dashboard/teacher/results-entry" element={
-              <ProtectedRoute allowedRoles={['teacher']}>
-                <ResultsEntry />
-              </ProtectedRoute>
-            } />
-            <Route path="/dashboard/teacher/results-analysis" element={
-              <ProtectedRoute allowedRoles={['teacher']}>
-                <TeacherResultsAnalysis />
-              </ProtectedRoute>
+              </ApprovalAwareRoute>
             } />
 
-            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+            {/* ========== SHARED TEACHER ROUTES (Available to all teaching staff) ========== */}
+            <Route path="/dashboard/teacher/attendance" element={
+              <TeacherRoute>
+                <AttendanceTracking />
+              </TeacherRoute>
+            } />
+            
+            <Route path="/dashboard/teacher/results-entry" element={
+              <TeacherRoute>
+                <ResultsEntry />
+              </TeacherRoute>
+            } />
+            
+            <Route path="/dashboard/teacher/results-analysis" element={
+              <TeacherRoute>
+                <TeacherResultsAnalysis />
+              </TeacherRoute>
+            } />
+
+            {/* ========== HOD SPECIFIC ROUTES ========== */}
+            <Route path="/dashboard/hod/department-performance" element={
+              <HoDRoute>
+                <DepartmentPerformance />
+              </HoDRoute>
+            } />
+            
+            <Route path="/dashboard/hod/department-teachers" element={
+              <HoDRoute>
+                <DepartmentTeachers />
+              </HoDRoute>
+            } />
+
+            {/* ========== CLASS TEACHER SPECIFIC ROUTES ========== */}
+            <Route path="/dashboard/class-teacher/daily-attendance" element={
+              <ClassTeacherRoute>
+                <DailyAttendance />
+              </ClassTeacherRoute>
+            } />
+            
+            <Route path="/dashboard/class-teacher/class-performance" element={
+              <ClassTeacherRoute>
+                <ClassPerformance />
+              </ClassTeacherRoute>
+            } />
+
+            {/* ========== SUBJECT TEACHER SPECIFIC ROUTES ========== */}
+            <Route path="/dashboard/subject-teacher/subject-performance" element={
+              <SubjectTeacherRoute>
+                <SubjectPerformance />
+              </SubjectTeacherRoute>
+            } />
+            
+            <Route path="/dashboard/subject-teacher/my-timetable" element={
+              <SubjectTeacherRoute>
+                <MyTimetable />
+              </SubjectTeacherRoute>
+            } />
+
+            {/* ========== CATCH-ALL ROUTE ========== */}
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>

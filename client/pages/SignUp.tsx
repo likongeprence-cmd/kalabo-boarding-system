@@ -1,10 +1,30 @@
+// src/pages/SignUp.tsx
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Layout } from '@/components/Layout';
-import { useAuth } from '@/hooks/useAuth';
-import { ArrowRight, Mail, Lock, User, BookOpen, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { useAuth, UserType } from '@/hooks/useAuth';
+import { RoleSelector } from '@/components/signup/RoleSelector';
+import { HoDDetails } from '@/components/signup/HoDDetails';
+import { SubjectTeacherDetails } from '@/components/signup/SubjectTeacherDetails';
+import { ClassTeacherDetails } from '@/components/signup/ClassTeacherDetails';
+import { BasicInfoForm } from '@/components/signup/BasicInfoForm';
+import { ReviewSubmit } from '@/components/signup/ReviewSubmit';
+import { 
+  ArrowRight, 
+  CheckCircle, 
+  XCircle,
+  ChevronLeft,
+  ChevronRight,
+  User,
+  Mail,
+  Lock,
+  BookOpen,
+  Users,
+  Layers,
+  Shield
+} from 'lucide-react';
 
-// Modal Dialog Component
+// Dialog Modal Component
 interface DialogProps {
   isOpen: boolean;
   type: 'success' | 'error';
@@ -16,24 +36,15 @@ interface DialogProps {
 const DialogModal = ({ isOpen, type, title, message, onClose }: DialogProps) => {
   if (!isOpen) return null;
 
-  const iconColor = type === 'success' ? 'text-green-500' : 'text-red-500';
-  const bgColor = type === 'success' ? 'bg-green-50' : 'bg-red-50';
-  const borderColor = type === 'success' ? 'border-green-200' : 'border-red-200';
-  const buttonColor = type === 'success' 
-    ? 'bg-green-600 hover:bg-green-700' 
-    : 'bg-blue-600 hover:bg-blue-700';
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
-      <div className={`w-full max-w-md rounded-2xl ${bgColor} border ${borderColor} shadow-2xl transform transition-all duration-300 scale-100 animate-scaleIn`}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <div className={`w-full max-w-md rounded-2xl ${
+        type === 'success' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+      } border shadow-2xl`}>
         <div className="p-6">
           <div className="flex items-start gap-4">
-            <div className={`${iconColor} flex-shrink-0`}>
-              {type === 'success' ? (
-                <CheckCircle size={28} className="animate-pulse" />
-              ) : (
-                <XCircle size={28} />
-              )}
+            <div className={type === 'success' ? 'text-green-500' : 'text-red-500'}>
+              {type === 'success' ? <CheckCircle size={28} /> : <XCircle size={28} />}
             </div>
             <div className="flex-1">
               <h3 className="text-lg font-semibold text-gray-900 mb-1">{title}</h3>
@@ -43,7 +54,9 @@ const DialogModal = ({ isOpen, type, title, message, onClose }: DialogProps) => 
           <div className="mt-6 flex justify-end">
             <button
               onClick={onClose}
-              className={`px-6 py-2.5 text-white font-medium rounded-lg transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] ${buttonColor}`}
+              className={`px-6 py-2.5 text-white font-medium rounded-lg ${
+                type === 'success' ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'
+              }`}
             >
               OK
             </button>
@@ -54,15 +67,76 @@ const DialogModal = ({ isOpen, type, title, message, onClose }: DialogProps) => 
   );
 };
 
+// Step indicator component
+const StepIndicator = ({ currentStep, totalSteps, role }: { currentStep: number; totalSteps: number; role: UserType | null }) => {
+  const getStepLabel = (step: number) => {
+    if (!role) return '';
+    
+    const labels: Record<string, string[]> = {
+      'planner': ['Account Details'],
+      'headteacher': ['Account Details'],
+      'deputy': ['Account Details'],
+      'hod': ['Role', 'Department & Subjects', 'Classes', 'Review'],
+      'subject_teacher': ['Role', 'Subjects', 'Classes', 'Review'],
+      'class_teacher': ['Role', 'Class Details', 'Subjects', 'Review']
+    };
+    
+    return labels[role]?.[step - 1] || '';
+  };
+
+  if (!role || ['planner', 'headteacher', 'deputy'].includes(role)) {
+    return null; // No step indicator for simple roles
+  }
+
+  return (
+    <div className="mb-8">
+      <div className="flex items-center justify-between mb-2">
+        {Array.from({ length: totalSteps }).map((_, i) => (
+          <div key={i} className="flex items-center flex-1">
+            <div className={`relative flex items-center justify-center w-8 h-8 rounded-full transition-all ${
+              i + 1 <= currentStep ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'
+            }`}>
+              {i + 1 < currentStep ? (
+                <CheckCircle size={16} />
+              ) : (
+                <span>{i + 1}</span>
+              )}
+            </div>
+            {i < totalSteps - 1 && (
+              <div className={`flex-1 h-1 mx-2 ${
+                i + 1 < currentStep ? 'bg-blue-600' : 'bg-gray-200'
+              }`} />
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-between text-xs text-gray-600">
+        {Array.from({ length: totalSteps }).map((_, i) => (
+          <span key={i} className="text-center flex-1">{getStepLabel(i + 1)}</span>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 export default function SignUp() {
-  const [userType, setUserType] = useState<'admin' | 'teacher'>('teacher');
+  const [step, setStep] = useState(1);
+  const [userType, setUserType] = useState<UserType | null>(null);
   const [formData, setFormData] = useState({
+    // Basic info
     email: '',
     password: '',
     confirmPassword: '',
     name: '',
-    subjects: '',
+    
+    // Teacher specific
+    department: '',
+    subjects: [] as string[],
+    classes: [] as string[],
+    isClassTeacher: false,
+    classTeacherOf: '',
   });
+  
   const [loading, setLoading] = useState(false);
   const [dialog, setDialog] = useState<{
     isOpen: boolean;
@@ -80,11 +154,22 @@ export default function SignUp() {
   const { signup, user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
+  // Determine total steps based on user type
+  const getTotalSteps = () => {
+    if (!userType) return 1;
+    if (['planner', 'headteacher', 'deputy'].includes(userType)) return 1;
+    if (userType === 'hod') return 4;
+    if (userType === 'subject_teacher') return 4;
+    if (userType === 'class_teacher') return 4;
+    return 1;
+  };
+
+  const totalSteps = getTotalSteps();
+
   // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated && user) {
-      console.log('Already authenticated, redirecting to dashboard');
-      if (user.userType === 'admin') {
+      if (user.userType === 'planner' || user.userType === 'headteacher' || user.userType === 'deputy') {
         navigate('/dashboard/admin', { replace: true });
       } else {
         navigate('/dashboard/teacher', { replace: true });
@@ -92,23 +177,97 @@ export default function SignUp() {
     }
   }, [isAuthenticated, user, navigate]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleUserTypeChange = (type: 'admin' | 'teacher') => {
-    setUserType(type);
-    if (type === 'admin') {
-      setFormData(prev => ({ ...prev, subjects: '' }));
+  const handleNext = () => {
+    // Validate current step
+    if (step === 1 && !userType) {
+      setDialog({
+        isOpen: true,
+        type: 'error',
+        title: 'Role Required',
+        message: 'Please select your role to continue'
+      });
+      return;
     }
+
+    // Validate step 2 for teacher roles
+    if (step === 2) {
+      if (userType === 'hod' && !formData.department) {
+        setDialog({
+          isOpen: true,
+          type: 'error',
+          title: 'Department Required',
+          message: 'Please select your department'
+        });
+        return;
+      }
+      
+      if (userType === 'subject_teacher' && formData.subjects.length === 0) {
+        setDialog({
+          isOpen: true,
+          type: 'error',
+          title: 'Subjects Required',
+          message: 'Please select at least one subject'
+        });
+        return;
+      }
+
+      if (userType === 'class_teacher' && !formData.classTeacherOf) {
+        setDialog({
+          isOpen: true,
+          type: 'error',
+          title: 'Class Required',
+          message: 'Please select your class'
+        });
+        return;
+      }
+    }
+
+    // Validate step 3 for teacher roles
+    if (step === 3) {
+      if (userType === 'hod' && formData.subjects.length === 0) {
+        setDialog({
+          isOpen: true,
+          type: 'error',
+          title: 'Subjects Required',
+          message: 'Please select at least one subject you teach'
+        });
+        return;
+      }
+
+      if (userType === 'subject_teacher' && formData.classes.length === 0) {
+        setDialog({
+          isOpen: true,
+          type: 'error',
+          title: 'Classes Required',
+          message: 'Please select at least one class you teach'
+        });
+        return;
+      }
+
+      if (userType === 'class_teacher' && formData.subjects.length === 0) {
+        setDialog({
+          isOpen: true,
+          type: 'error',
+          title: 'Subjects Required',
+          message: 'Please select at least one subject you teach'
+        });
+        return;
+      }
+    }
+
+    setStep(step + 1);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
+  const handleBack = () => {
+    setStep(step - 1);
+  };
 
-    // Validation
+  const validateBasicInfo = () => {
     if (!formData.email || !formData.password || !formData.name) {
       setDialog({
         isOpen: true,
@@ -116,8 +275,7 @@ export default function SignUp() {
         title: 'Missing Information',
         message: 'Please fill in all required fields'
       });
-      setLoading(false);
-      return;
+      return false;
     }
 
     if (formData.password !== formData.confirmPassword) {
@@ -127,8 +285,7 @@ export default function SignUp() {
         title: 'Password Mismatch',
         message: 'The passwords you entered do not match'
       });
-      setLoading(false);
-      return;
+      return false;
     }
 
     if (formData.password.length < 6) {
@@ -138,43 +295,58 @@ export default function SignUp() {
         title: 'Weak Password',
         message: 'Password must be at least 6 characters long'
       });
-      setLoading(false);
-      return;
+      return false;
     }
 
-    if (userType === 'teacher' && !formData.subjects.trim()) {
-      setDialog({
-        isOpen: true,
-        type: 'error',
-        title: 'Subjects Required',
-        message: 'Please specify the subjects you teach'
-      });
-      setLoading(false);
-      return;
-    }
+    return true;
+  };
+
+  const handleSubmit = async () => {
+    if (!validateBasicInfo()) return;
+
+    setLoading(true);
 
     try {
-      const subjects = userType === 'teacher' 
-        ? formData.subjects.split(',').map(s => s.trim()).filter(s => s)
-        : undefined;
+      // Prepare teacher details based on role
+      let teacherDetails = undefined;
       
+      if (userType === 'hod' || userType === 'subject_teacher' || userType === 'class_teacher') {
+        // Format subjects with classes
+        const subjectAssignments = formData.subjects.map(subject => ({
+          subject,
+          classes: formData.classes
+        }));
+
+        teacherDetails = {
+          subjects: subjectAssignments,
+          isClassTeacher: formData.isClassTeacher,
+          classTeacherOf: formData.classTeacherOf || undefined,
+          ...(userType === 'hod' && { department: formData.department })
+        };
+      }
+
       await signup(
-        formData.email, 
-        formData.password, 
-        formData.name, 
-        userType,
-        subjects
+        formData.email,
+        formData.password,
+        formData.name,
+        userType!,
+        teacherDetails
       );
-      
-      // Show success dialog - DON'T redirect yet
+
+      // Show success message based on role
+      const needsApproval = ['subject_teacher', 'class_teacher', 'hod'].includes(userType!);
+      const message = needsApproval
+        ? `Your ${userType?.replace('_', ' ')} account has been created and is pending approval. You will be notified once approved.`
+        : `Your ${userType} account has been created successfully. You can now sign in.`;
+
       setDialog({
         isOpen: true,
         type: 'success',
         title: 'Account Created!',
-        message: `Your ${userType} account has been created successfully.`,
+        message,
         redirectTo: '/signin'
       });
-      
+
     } catch (err: any) {
       setDialog({
         isOpen: true,
@@ -182,20 +354,279 @@ export default function SignUp() {
         title: 'Sign Up Failed',
         message: err.message || 'Unable to create account. Please try again.'
       });
+    } finally {
       setLoading(false);
     }
   };
 
   const handleDialogClose = () => {
     setDialog(prev => ({ ...prev, isOpen: false }));
-    // Only redirect if it's a success dialog with redirect path
     if (dialog.type === 'success' && dialog.redirectTo) {
-      navigate(dialog.redirectTo, { 
-        state: { 
-          message: `Your ${userType} account has been created successfully! Please sign in.`,
+      navigate(dialog.redirectTo, {
+        state: {
+          message: dialog.message,
           email: formData.email
-        } 
+        }
       });
+    }
+  };
+
+  // Render current step
+  const renderStep = () => {
+    // Simple roles (planner, headteacher, deputy) - just show basic info
+    if (userType && ['planner', 'headteacher', 'deputy'].includes(userType)) {
+      return (
+        <div className="space-y-6">
+          <BasicInfoForm
+            formData={formData}
+            onChange={handleChange}
+            loading={loading}
+          />
+          
+          <div className="flex justify-end pt-4">
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={loading}
+              className="px-8 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-blue-800 disabled:from-gray-400 disabled:to-gray-500 transition-all flex items-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                  <span>Creating Account...</span>
+                </>
+              ) : (
+                <>
+                  <span>Create Account</span>
+                  <ArrowRight size={18} />
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // Progressive steps for teacher roles
+    switch (step) {
+      case 1: // Role Selection
+        return (
+          <div className="space-y-6">
+            <RoleSelector
+              selectedRole={userType}
+              onSelectRole={setUserType}
+              disabled={loading}
+            />
+            <div className="flex justify-end pt-4">
+              <button
+                type="button"
+                onClick={handleNext}
+                disabled={!userType || loading}
+                className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-all flex items-center gap-2"
+              >
+                Continue
+                <ChevronRight size={18} />
+              </button>
+            </div>
+          </div>
+        );
+
+      case 2: // Role-specific step 1
+        return (
+          <div className="space-y-6">
+            {userType === 'hod' && (
+              <HoDDetails
+                department={formData.department}
+                onDepartmentChange={(dept) => setFormData(prev => ({ ...prev, department: dept }))}
+                subjects={formData.subjects}
+                onSubjectsChange={(subjects) => setFormData(prev => ({ ...prev, subjects }))}
+                classes={formData.classes}
+                onClassesChange={(classes) => setFormData(prev => ({ ...prev, classes }))}
+                isClassTeacher={formData.isClassTeacher}
+                onIsClassTeacherChange={(value) => setFormData(prev => ({ ...prev, isClassTeacher: value }))}
+                classTeacherOf={formData.classTeacherOf}
+                onClassTeacherOfChange={(value) => setFormData(prev => ({ ...prev, classTeacherOf: value }))}
+                disabled={loading}
+                step={1} // First step of HoD form
+              />
+            )}
+
+            {userType === 'subject_teacher' && (
+              <SubjectTeacherDetails
+                subjects={formData.subjects}
+                onSubjectsChange={(subjects) => setFormData(prev => ({ ...prev, subjects }))}
+                classes={formData.classes}
+                onClassesChange={(classes) => setFormData(prev => ({ ...prev, classes }))}
+                isClassTeacher={formData.isClassTeacher}
+                onIsClassTeacherChange={(value) => setFormData(prev => ({ ...prev, isClassTeacher: value }))}
+                classTeacherOf={formData.classTeacherOf}
+                onClassTeacherOfChange={(value) => setFormData(prev => ({ ...prev, classTeacherOf: value }))}
+                disabled={loading}
+                step={1} // First step: Subjects
+              />
+            )}
+
+            {userType === 'class_teacher' && (
+              <ClassTeacherDetails
+                classTeacherOf={formData.classTeacherOf}
+                onClassTeacherOfChange={(value) => setFormData(prev => ({ ...prev, classTeacherOf: value }))}
+                subjects={formData.subjects}
+                onSubjectsChange={(subjects) => setFormData(prev => ({ ...prev, subjects }))}
+                disabled={loading}
+                step={1} // First step: Class selection
+              />
+            )}
+
+            <div className="flex items-center justify-between pt-4">
+              <button
+                type="button"
+                onClick={handleBack}
+                disabled={loading}
+                className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-all flex items-center gap-2"
+              >
+                <ChevronLeft size={18} />
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={handleNext}
+                disabled={loading}
+                className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-all flex items-center gap-2"
+              >
+                Continue
+                <ChevronRight size={18} />
+              </button>
+            </div>
+          </div>
+        );
+
+      case 3: // Role-specific step 2
+        return (
+          <div className="space-y-6">
+            {userType === 'hod' && (
+              <HoDDetails
+                department={formData.department}
+                onDepartmentChange={(dept) => setFormData(prev => ({ ...prev, department: dept }))}
+                subjects={formData.subjects}
+                onSubjectsChange={(subjects) => setFormData(prev => ({ ...prev, subjects }))}
+                classes={formData.classes}
+                onClassesChange={(classes) => setFormData(prev => ({ ...prev, classes }))}
+                isClassTeacher={formData.isClassTeacher}
+                onIsClassTeacherChange={(value) => setFormData(prev => ({ ...prev, isClassTeacher: value }))}
+                classTeacherOf={formData.classTeacherOf}
+                onClassTeacherOfChange={(value) => setFormData(prev => ({ ...prev, classTeacherOf: value }))}
+                disabled={loading}
+                step={2} // Second step: Subjects
+              />
+            )}
+
+            {userType === 'subject_teacher' && (
+              <SubjectTeacherDetails
+                subjects={formData.subjects}
+                onSubjectsChange={(subjects) => setFormData(prev => ({ ...prev, subjects }))}
+                classes={formData.classes}
+                onClassesChange={(classes) => setFormData(prev => ({ ...prev, classes }))}
+                isClassTeacher={formData.isClassTeacher}
+                onIsClassTeacherChange={(value) => setFormData(prev => ({ ...prev, isClassTeacher: value }))}
+                classTeacherOf={formData.classTeacherOf}
+                onClassTeacherOfChange={(value) => setFormData(prev => ({ ...prev, classTeacherOf: value }))}
+                disabled={loading}
+                step={2} // Second step: Classes
+              />
+            )}
+
+            {userType === 'class_teacher' && (
+              <ClassTeacherDetails
+                classTeacherOf={formData.classTeacherOf}
+                onClassTeacherOfChange={(value) => setFormData(prev => ({ ...prev, classTeacherOf: value }))}
+                subjects={formData.subjects}
+                onSubjectsChange={(subjects) => setFormData(prev => ({ ...prev, subjects }))}
+                disabled={loading}
+                step={2} // Second step: Subjects
+              />
+            )}
+
+            <div className="flex items-center justify-between pt-4">
+              <button
+                type="button"
+                onClick={handleBack}
+                disabled={loading}
+                className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-all flex items-center gap-2"
+              >
+                <ChevronLeft size={18} />
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={handleNext}
+                disabled={loading}
+                className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-all flex items-center gap-2"
+              >
+                Continue
+                <ChevronRight size={18} />
+              </button>
+            </div>
+          </div>
+        );
+
+      case 4: // Basic Info & Review
+        return (
+          <div className="space-y-6">
+            <BasicInfoForm
+              formData={formData}
+              onChange={handleChange}
+              loading={loading}
+            />
+
+            {/* Review Section */}
+            <ReviewSubmit
+              userType={userType!}
+              formData={formData}
+            />
+
+            {/* Approval Notice */}
+            {userType && ['subject_teacher', 'class_teacher', 'hod'].includes(userType) && (
+              <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
+                <p className="text-sm text-amber-700">
+                  <span className="font-medium">Note:</span> Your account will require approval from the planner before you can access the system.
+                </p>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-4">
+              <button
+                type="button"
+                onClick={handleBack}
+                disabled={loading}
+                className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-all flex items-center gap-2"
+              >
+                <ChevronLeft size={18} />
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={loading}
+                className="px-8 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-blue-800 disabled:from-gray-400 disabled:to-gray-500 transition-all flex items-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                    <span>Creating Account...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Create Account</span>
+                    <ArrowRight size={18} />
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        );
+
+      default:
+        return null;
     }
   };
 
@@ -208,225 +639,41 @@ export default function SignUp() {
         message={dialog.message}
         onClose={handleDialogClose}
       />
-      
-      <Layout className="flex items-center justify-center min-h-screen py-4 px-4">
-        <div className="w-full max-w-md mx-auto">
+
+      <Layout className="flex items-center justify-center min-h-screen py-8 px-4">
+        <div className="w-full max-w-2xl mx-auto">
           {/* Header */}
           <div className="text-center mb-8">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
               Create Account
             </h1>
-            <p className="text-gray-600 text-sm sm:text-base">
-              Join KalaboBoarding-SRS
+            <p className="text-gray-600">
+              Join KalaboBoarding School Management System
             </p>
           </div>
 
+          {/* Progress Steps - Only for teacher roles */}
+          <StepIndicator 
+            currentStep={step} 
+            totalSteps={totalSteps} 
+            role={userType} 
+          />
+
           {/* Main Form Card */}
           <div className="bg-white rounded-2xl shadow-lg p-6 sm:p-8 border border-gray-100">
-            {/* Role Selection */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-3">
-                Select Your Role *
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => handleUserTypeChange('admin')}
-                  disabled={loading}
-                  className={`p-4 rounded-xl border-2 transition-all duration-200 text-center font-medium flex flex-col items-center ${
-                    userType === 'admin'
-                      ? 'border-blue-600 bg-blue-50 text-blue-700'
-                      : 'border-gray-200 bg-white text-gray-700 hover:border-blue-300 hover:bg-blue-50'
-                  } disabled:opacity-50 disabled:cursor-not-allowed`}
-                >
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center mb-2 ${
-                    userType === 'admin' ? 'bg-blue-600' : 'bg-gray-100'
-                  }`}>
-                    <User size={16} className={userType === 'admin' ? 'text-white' : 'text-gray-600'} />
-                  </div>
-                  <span className="text-sm">Administrator</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleUserTypeChange('teacher')}
-                  disabled={loading}
-                  className={`p-4 rounded-xl border-2 transition-all duration-200 text-center font-medium flex flex-col items-center ${
-                    userType === 'teacher'
-                      ? 'border-blue-600 bg-blue-50 text-blue-700'
-                      : 'border-gray-200 bg-white text-gray-700 hover:border-blue-300 hover:bg-blue-50'
-                  } disabled:opacity-50 disabled:cursor-not-allowed`}
-                >
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center mb-2 ${
-                    userType === 'teacher' ? 'bg-blue-600' : 'bg-gray-100'
-                  }`}>
-                    <BookOpen size={16} className={userType === 'teacher' ? 'text-white' : 'text-gray-600'} />
-                  </div>
-                  <span className="text-sm">Teacher</span>
-                </button>
-              </div>
-              <div className="mt-3 p-3 bg-blue-50 rounded-lg">
-                <p className="text-xs text-blue-700">
-                  <span className="font-medium">Creating:</span> {userType} account
-                  {userType === 'admin' && ' (Only one per school)'}
-                </p>
-              </div>
-            </div>
-
-            {/* Form */}
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Name */}
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700">
-                  Full Name *
-                </label>
-                <div className="relative">
-                  <User className="absolute left-3 top-3.5 text-gray-400" size={20} />
-                  <input
-                    type="text"
-                    name="name"
-                    value={formData.name}
-                    onChange={handleChange}
-                    placeholder="John Doe"
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
-                    required
-                    disabled={loading}
-                    autoComplete="name"
-                  />
-                </div>
-              </div>
-
-              {/* Email */}
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700">
-                  Email Address *
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-3.5 text-gray-400" size={20} />
-                  <input
-                    type="email"
-                    name="email"
-                    value={formData.email}
-                    onChange={handleChange}
-                    placeholder="john@example.com"
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
-                    required
-                    disabled={loading}
-                    autoComplete="email"
-                  />
-                </div>
-              </div>
-
-              {/* Subjects (Teacher Only) */}
-              {userType === 'teacher' && (
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700">
-                    Subjects You Teach *
-                  </label>
-                  <div className="relative">
-                    <BookOpen className="absolute left-3 top-3.5 text-gray-400" size={20} />
-                    <textarea
-                      name="subjects"
-                      value={formData.subjects}
-                      onChange={handleChange}
-                      placeholder="Mathematics, English, Science"
-                      rows={2}
-                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all resize-none disabled:bg-gray-100 disabled:cursor-not-allowed"
-                      required
-                      disabled={loading}
-                    />
-                  </div>
-                  <p className="text-xs text-gray-500">
-                    Separate subjects with commas
-                  </p>
-                </div>
-              )}
-
-              {/* Password */}
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700">
-                  Password *
-                </label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-3.5 text-gray-400" size={20} />
-                  <input
-                    type="password"
-                    name="password"
-                    value={formData.password}
-                    onChange={handleChange}
-                    placeholder="••••••••"
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
-                    required
-                    minLength={6}
-                    disabled={loading}
-                    autoComplete="new-password"
-                  />
-                </div>
-              </div>
-
-              {/* Confirm Password */}
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700">
-                  Confirm Password *
-                </label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-3.5 text-gray-400" size={20} />
-                  <input
-                    type="password"
-                    name="confirmPassword"
-                    value={formData.confirmPassword}
-                    onChange={handleChange}
-                    placeholder="••••••••"
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
-                    required
-                    disabled={loading}
-                    autoComplete="new-password"
-                  />
-                </div>
-              </div>
-
-              {/* Admin Note */}
-              {userType === 'admin' && (
-                <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
-                  <div className="flex items-start gap-2">
-                    <AlertCircle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
-                    <p className="text-xs text-amber-700">
-                      <span className="font-medium">Important:</span> Only one administrator account is allowed per school.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Submit Button */}
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full mt-4 py-3.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-2 group relative shadow-md hover:shadow-lg"
-              >
-                {loading ? (
-                  <div className="flex items-center gap-2">
-                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
-                    <span>Creating Account...</span>
-                  </div>
-                ) : (
-                  <>
-                    <span>Create {userType.charAt(0).toUpperCase() + userType.slice(1)} Account</span>
-                    <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
-                  </>
-                )}
-              </button>
-            </form>
+            {renderStep()}
 
             {/* Sign In Link */}
             <div className="mt-6 pt-6 border-t border-gray-200">
               <div className="text-center">
                 <p className="text-gray-600 text-sm">
                   Already have an account?{' '}
-                  <Link 
-                    to="/signin" 
-                    className="text-blue-600 font-semibold hover:text-blue-700 transition-colors inline-flex items-center gap-1 group"
+                  <Link
+                    to="/signin"
+                    className="text-blue-600 font-semibold hover:text-blue-700 transition-colors inline-flex items-center gap-1"
                   >
-                    <span>Sign In</span>
-                    <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+                    Sign In
+                    <ArrowRight size={14} />
                   </Link>
                 </p>
               </div>

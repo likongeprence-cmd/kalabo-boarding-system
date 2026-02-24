@@ -9,14 +9,31 @@ import {
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 
-export type UserType = 'admin' | 'teacher';
+// ========== UPDATED TYPES ==========
+export type UserType = 'planner' | 'subject_teacher' | 'class_teacher' | 'hod' | 'headteacher' | 'deputy';
+
+export interface SubjectAssignment {
+  subject: string;
+  classes: string[]; // class names like "Grade 8A"
+}
+
+export interface TeacherDetails {
+  subjects: SubjectAssignment[];
+  isClassTeacher?: boolean;
+  classTeacherOf?: string; // class name if they are class teacher
+  department?: string; // for HoDs
+}
 
 export interface User {
   id: string;
   email: string;
   name: string;
   userType: UserType;
-  subjects?: string[];
+  teacherDetails?: TeacherDetails;
+  isApproved: boolean; // false for teachers/HoDs until planner approves
+  createdAt: string;
+  approvedAt?: string;
+  approvedBy?: string; // planner ID who approved
 }
 
 interface AuthContextType {
@@ -26,7 +43,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  signup: (email: string, password: string, name: string, userType: UserType, subjects?: string[]) => Promise<void>;
+  signup: (email: string, password: string, name: string, userType: UserType, teacherDetails?: TeacherDetails) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -35,6 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // ========== UPDATED AUTH LISTENER WITH APPROVAL HANDLING ==========
   useEffect(() => {
     console.log('🔥 Setting up auth state listener');
     
@@ -43,29 +61,66 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (firebaseUser) {
         try {
-          // Fetch user data from Firestore
+          // Check localStorage first for immediate data
+          const storedUser = localStorage.getItem('kalaboboarding_user');
+          if (storedUser) {
+            const parsedUser = JSON.parse(storedUser);
+            if (parsedUser.id === firebaseUser.uid) {
+              console.log('📦 Using stored user data for:', parsedUser.email, 'type:', parsedUser.userType);
+              
+              // Check approval status for teacher roles
+              if (!parsedUser.isApproved && ['subject_teacher', 'class_teacher', 'hod'].includes(parsedUser.userType)) {
+                console.log('⏳ User pending approval');
+              }
+              
+              setUser(parsedUser);
+              setIsLoading(false);
+              return;
+            }
+          }
+
+          // If no stored data, fetch from Firestore with retry
           console.log('📥 Fetching user data from Firestore for:', firebaseUser.uid);
-          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          let userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          
+          // Retry once if document doesn't exist (for signup case)
+          if (!userDoc.exists()) {
+            console.log('⏳ User document not found, waiting 1 second and retrying...');
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          }
           
           if (userDoc.exists()) {
-            const userData = userDoc.data() as Omit<User, 'id'>;
-            console.log('✅ Firestore data found, user type:', userData.userType);
+            const userData = userDoc.data();
             
+            // Map Firestore data to User type
             const newUser: User = {
               id: firebaseUser.uid,
-              ...userData
+              email: userData.email,
+              name: userData.name,
+              userType: userData.userType,
+              teacherDetails: userData.teacherDetails || undefined,
+              isApproved: userData.isApproved || false,
+              createdAt: userData.createdAt,
+              approvedAt: userData.approvedAt,
+              approvedBy: userData.approvedBy
             };
+            
+            console.log('✅ Firestore data found, user type:', newUser.userType, 'approved:', newUser.isApproved);
             
             // Store in localStorage for persistence
             localStorage.setItem('kalaboboarding_user', JSON.stringify(newUser));
             setUser(newUser);
           } else {
-            console.warn('❌ User document not found in Firestore');
-            // Don't create default user - this causes the teacher type issue
+            console.error('❌ User document not found in Firestore after retry');
+            await signOut(auth);
+            localStorage.removeItem('kalaboboarding_user');
             setUser(null);
           }
         } catch (error) {
           console.error('❌ Error fetching user data:', error);
+          await signOut(auth);
+          localStorage.removeItem('kalaboboarding_user');
           setUser(null);
         }
       } else {
@@ -84,46 +139,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // ========== UPDATED SIGNUP WITH APPROVAL LOGIC ==========
   const signup = async (
-    email: string, 
-    password: string, 
-    name: string, 
+    email: string,
+    password: string,
+    name: string,
     userType: UserType,
-    subjects?: string[]
+    teacherDetails?: TeacherDetails
   ) => {
     try {
       console.log('🚀 Starting signup for:', email, 'type:', userType);
+      
+      // Determine if account needs approval (teachers and HoDs need approval)
+      const needsApproval = ['subject_teacher', 'class_teacher', 'hod'].includes(userType);
       
       // 1. Create user in Firebase Authentication
       console.log('🔐 Creating Firebase auth user...');
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       console.log('✅ Firebase auth user created:', userCredential.user.uid);
       
-      // 2. Store additional user data in Firestore
+      // 2. Create user object immediately
+      const now = new Date().toISOString();
+      const newUser: User = {
+        id: userCredential.user.uid,
+        email,
+        name,
+        userType,
+        teacherDetails,
+        isApproved: !needsApproval, // Auto-approve planners, head, deputy
+        createdAt: now,
+        ...(!needsApproval && { approvedAt: now }) // Set approvedAt if auto-approved
+      };
+      
+      // 3. Store in localStorage FIRST so auth listener can use it
+      localStorage.setItem('kalaboboarding_user', JSON.stringify(newUser));
+      
+      // 4. Store additional user data in Firestore
       const userData = {
         email,
         name,
         userType,
-        subjects: subjects || [],
-        createdAt: new Date().toISOString(),
+        teacherDetails: teacherDetails || null,
+        isApproved: !needsApproval,
+        createdAt: now,
+        ...(!needsApproval && { approvedAt: now })
       };
       
       console.log('💾 Saving to Firestore with data:', userData);
       await setDoc(doc(db, 'users', userCredential.user.uid), userData);
       console.log('✅ Firestore document saved');
       
-      // 3. Create user object WITHOUT setting state (let onAuthStateChanged handle it)
-      const newUser: User = {
-        id: userCredential.user.uid,
-        ...userData
-      };
+      // 5. Set user state immediately
+      setUser(newUser);
       
-      // Store in localStorage temporarily
-      localStorage.setItem('kalaboboarding_user', JSON.stringify(newUser));
+      console.log('🎉 Signup complete for user:', newUser.email, 'type:', newUser.userType, 'approved:', newUser.isApproved);
       
-      console.log('🎉 Signup complete for user:', newUser.email, 'type:', newUser.userType);
-      
-      // Return success - DON'T set user state here, let the auth listener handle it
       return Promise.resolve();
       
     } catch (error: any) {
@@ -160,6 +230,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // ========== UPDATED LOGIN WITH APPROVAL CHECK ==========
   const login = async (email: string, password: string) => {
     try {
       console.log('🔑 Attempting login for:', email);
@@ -174,17 +245,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (!userDoc.exists()) {
         console.error('❌ User document not found in Firestore');
+        await signOut(auth);
         localStorage.removeItem('kalaboboarding_user');
         return Promise.reject(new Error('User data not found. Please contact support.'));
       }
       
-      const userData = userDoc.data() as Omit<User, 'id'>;
+      const userData = userDoc.data();
+      
+      // Map Firestore data to User type
       const loggedInUser: User = {
         id: userCredential.user.uid,
-        ...userData
+        email: userData.email,
+        name: userData.name,
+        userType: userData.userType,
+        teacherDetails: userData.teacherDetails || undefined,
+        isApproved: userData.isApproved || false,
+        createdAt: userData.createdAt,
+        approvedAt: userData.approvedAt,
+        approvedBy: userData.approvedBy
       };
       
-      console.log('✅ Login successful, user type:', loggedInUser.userType);
+      console.log('✅ Login successful, user type:', loggedInUser.userType, 'approved:', loggedInUser.isApproved);
+      
+      // Check if user is approved (for teacher roles)
+      if (!loggedInUser.isApproved && ['subject_teacher', 'class_teacher', 'hod'].includes(loggedInUser.userType)) {
+        console.log('⏳ User pending approval');
+        // Still store user but they'll be redirected to pending page by ProtectedRoute
+      }
       
       // Store in localStorage for persistence
       localStorage.setItem('kalaboboarding_user', JSON.stringify(loggedInUser));
@@ -219,6 +306,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // ========== LOGOUT (unchanged) ==========
   const logout = async () => {
     try {
       console.log('👋 Logging out...');
